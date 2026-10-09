@@ -1,0 +1,64 @@
+name: Surveillance Doctolib
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: doctolib-monitor
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+    steps:
+      - name: Récupérer le projet
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Restaurer Chromium
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-1.55.0
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install -r requirements.txt
+          python -m playwright install chromium
+
+      - name: Ajouter un léger décalage aléatoire
+        if: github.event_name == 'schedule'
+        run: sleep $((RANDOM % 61))
+
+      - name: Tester Discord lors d'un lancement manuel
+        if: github.event_name == 'workflow_dispatch'
+        run: python doctolib_discord_monitor.py --test-discord
+
+      - name: Vérifier Doctolib
+        run: python doctolib_discord_monitor.py
+
+      - name: Sauvegarder l'état anti-spam
+        run: |
+          if git diff --quiet -- state.json; then
+            echo "État inchangé."
+            exit 0
+          fi
+          git config user.name "doctolib-monitor[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state.json
+          git commit -m "chore: update monitor state"
+          git push
