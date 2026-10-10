@@ -3,7 +3,7 @@
   "signature": "",
   "slots": [],
   "last_status": "unknown",
-  "consecutive_errors": 2,
-  "technical_alert_sent": false,
+  "consecutive_errors": 3,
+  "technical_alert_sent": true,
   "retry_not_before_epoch": 0
 }
