@@ -372,7 +372,14 @@ async def check_once(settings: dict[str, Any], diagnostic: bool = False) -> Chec
             if status == "none":
                 return CheckResult("none", [], selected)
             await save_diagnostic(page, "last-unknown", events)
-            return CheckResult("unknown", [], "Motif sélectionné, mais l'état des disponibilités reste ambigu.")
+            body = await page_text(page)
+            excerpt = compact(body[-1200:])
+            return CheckResult(
+                "unknown",
+                [],
+                "Motif sélectionné, mais l'état des disponibilités reste ambigu. "
+                f"Aperçu de la page : {excerpt}",
+            )
         except Exception:
             try:
                 await save_diagnostic(page, "last-error", events)
