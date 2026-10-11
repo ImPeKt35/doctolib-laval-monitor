@@ -372,14 +372,16 @@ async def check_once(settings: dict[str, Any], diagnostic: bool = False) -> Chec
             if status == "none":
                 return CheckResult("none", [], selected)
             await save_diagnostic(page, "last-unknown", events)
-            body = await page_text(page)
-            excerpt = compact(body[-1200:])
-            return CheckResult(
-                "unknown",
-                [],
-                "Motif sélectionné, mais l'état des disponibilités reste ambigu. "
-                f"Aperçu de la page : {excerpt}",
+            slot_api_blocked = any(
+                "HTTP error 403" in event and "['slots'" in event for event in events
             )
+            if slot_api_blocked:
+                return CheckResult(
+                    "blocked",
+                    [],
+                    "Doctolib refuse l'accès à l'API des créneaux depuis l'hébergement cloud (HTTP 403).",
+                )
+            return CheckResult("unknown", [], "Motif sélectionné, mais l'état des disponibilités reste ambigu.")
         except Exception:
             try:
                 await save_diagnostic(page, "last-error", events)
@@ -456,10 +458,19 @@ async def run_check(settings: dict[str, Any], diagnostic: bool = False) -> str:
             log("Protection HTTP 429 : prochain essai différé d'au moins 15 minutes.")
         if errors >= 3 and not state.get("technical_alert_sent") and webhook:
             try:
+                if result.status == "blocked":
+                    alert_detail = (
+                        "Doctolib bloque l'accès aux créneaux depuis l'hébergement cloud. "
+                        "La surveillance cloud ne peut donc pas confirmer les disponibilités."
+                    )
+                else:
+                    alert_detail = (
+                        "Le programme n'arrive plus à lire correctement la page Doctolib "
+                        "depuis 3 vérifications consécutives."
+                    )
                 send_discord(
                     "⚠️ **Surveillance Doctolib à vérifier**\n\n"
-                    "Le programme n'arrive plus à lire correctement la page Doctolib "
-                    "depuis 3 vérifications consécutives.\n\n"
+                    f"{alert_detail}\n\n"
                     f"{DOCTOR_URL}",
                     webhook,
                 )
