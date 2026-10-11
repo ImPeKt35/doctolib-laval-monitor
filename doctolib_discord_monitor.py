@@ -456,6 +456,9 @@ async def run_check(settings: dict[str, Any], diagnostic: bool = False) -> str:
         if result.status == "rate_limited":
             state["retry_not_before_epoch"] = int(time.time()) + 900
             log("Protection HTTP 429 : prochain essai différé d'au moins 15 minutes.")
+        elif result.status == "blocked":
+            state["retry_not_before_epoch"] = int(time.time()) + 21600
+            log("Blocage cloud HTTP 403 : prochain essai différé d'au moins 6 heures.")
         if errors >= 3 and not state.get("technical_alert_sent") and webhook:
             try:
                 if result.status == "blocked":
