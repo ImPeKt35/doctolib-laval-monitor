@@ -63,6 +63,15 @@ jobs:
             exit "$status"
           fi
 
+      - name: Conserver le diagnostic en cas de lecture ambiguë
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-doctolib
+          path: output/playwright/last-unknown*
+          if-no-files-found: ignore
+          retention-days: 1
+
       - name: Sauvegarder l'état anti-spam
         run: |
           if git diff --quiet -- state.json; then
