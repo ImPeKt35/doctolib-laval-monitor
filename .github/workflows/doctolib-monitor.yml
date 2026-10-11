@@ -2,9 +2,9 @@ name: Surveillance Doctolib
 
 on:
   schedule:
-    # Décalage de trois minutes pour éviter le pic de charge GitHub
-    # au début de chaque heure.
-    - cron: "3-58/5 * * * *"
+    # Le cloud sert uniquement à vérifier si le blocage HTTP 403 de
+    # Doctolib a disparu. La surveillance active reste locale.
+    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       test_discord:
