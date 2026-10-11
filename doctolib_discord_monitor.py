@@ -48,7 +48,8 @@ DATE_RE = re.compile(
 NO_AVAILABILITY_RE = re.compile(
     r"aucun(?:e)?\s+(?:créneau|creneau|disponibilité|disponibilite)|"
     r"pas\s+de\s+(?:créneau|creneau|disponibilité|disponibilite)|"
-    r"n['’]a\s+pas\s+de\s+disponibilit",
+    r"n['’]a\s+pas\s+de\s+disponibilit|"
+    r"prise\s+de\s+rendez[- ]?vous\s+en\s+ligne\s+n['’]est.{0,80}pas\s+disponible",
     re.I,
 )
 CHALLENGE_RE = re.compile(
@@ -303,6 +304,28 @@ async def detect_slots(page: Page) -> list[dict[str, str]]:
     return sorted(unique.values(), key=lambda slot: (slot["date"].casefold(), slot["time"]))
 
 
+async def wait_for_availability_state(
+    page: Page, timeout_seconds: int = 20
+) -> tuple[str, list[dict[str, str]]]:
+    """Attend que le module affiche des créneaux ou un message d'indisponibilité.
+
+    L'interface Doctolib est hydratée de façon asynchrone. Sur les runners
+    GitHub, le message final peut apparaître plusieurs secondes après le clic
+    sur le motif; une lecture immédiate produisait alors un faux état ambigu.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    while asyncio.get_running_loop().time() < deadline:
+        if await challenge_detected(page):
+            raise RuntimeError("Challenge ou protection anti-robot détecté; aucun contournement tenté.")
+        slots = await detect_slots(page)
+        if slots:
+            return "available", slots
+        if NO_AVAILABILITY_RE.search(await page_text(page)):
+            return "none", []
+        await page.wait_for_timeout(750)
+    return "unknown", []
+
+
 async def save_diagnostic(page: Page, stem: str, events: list[str] | None = None) -> None:
     """Écrase un seul diagnostic par type afin de ne pas accumuler de fichiers."""
     output = APP_DIR / "output" / "playwright"
@@ -341,15 +364,14 @@ async def check_once(settings: dict[str, Any], diagnostic: bool = False) -> Chec
                 raise RuntimeError("Challenge ou protection anti-robot détecté; aucun contournement tenté.")
             await open_booking(page)
             selected = await choose_first_appointment(page)
-            await page.wait_for_timeout(1200)
-            slots = await detect_slots(page)
+            status, slots = await wait_for_availability_state(page)
             if diagnostic:
                 await save_diagnostic(page, "diagnostic", events)
-            if slots:
+            if status == "available":
                 return CheckResult("available", slots, selected)
-            body = await page_text(page)
-            if NO_AVAILABILITY_RE.search(body):
+            if status == "none":
                 return CheckResult("none", [], selected)
+            await save_diagnostic(page, "last-unknown", events)
             return CheckResult("unknown", [], "Motif sélectionné, mais l'état des disponibilités reste ambigu.")
         except Exception:
             try:
