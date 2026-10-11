@@ -2,7 +2,9 @@ name: Surveillance Doctolib
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    # Décalage de trois minutes pour éviter le pic de charge GitHub
+    # au début de chaque heure.
+    - cron: "3-58/5 * * * *"
   workflow_dispatch:
 
 permissions:
