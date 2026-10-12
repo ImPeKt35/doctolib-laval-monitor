@@ -2,7 +2,7 @@
   "available": false,
   "signature": "",
   "slots": [],
-  "last_status": "blocked",
+  "last_status": "error",
   "consecutive_errors": 3,
   "technical_alert_sent": true,
   "retry_not_before_epoch": 1791787095
