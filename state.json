@@ -2,8 +2,8 @@
   "available": false,
   "signature": "",
   "slots": [],
-  "last_status": "error",
+  "last_status": "blocked",
   "consecutive_errors": 3,
   "technical_alert_sent": true,
-  "retry_not_before_epoch": 1791899276
+  "retry_not_before_epoch": 1791948022
 }
