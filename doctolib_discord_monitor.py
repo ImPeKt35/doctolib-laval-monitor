@@ -272,11 +272,25 @@ async def slot_label(element: Locator) -> tuple[str, str] | None:
         context = compact(
             await element.evaluate(
                 """el => {
+                  const datePattern = /\\b(?:lun|mar|mer|jeu|ven|sam|dim)[a-zéû]*\\.?\\s+\\d{1,2}\\s+(?:janv|févr|fevr|mars|avr|mai|juin|juil|août|aout|sept|oct|nov|déc|dec)[a-zéû]*/i;
                   let n = el;
                   for (let i = 0; i < 5 && n; i++, n = n.parentElement) {
                     const t = (n.innerText || '').replace(/\\s+/g, ' ').trim();
-                    if (/\\b(?:lun|mar|mer|jeu|ven|sam|dim)|janv|févr|mars|avr|mai|juin|juil|août|sept|oct|nov|déc/i.test(t)) return t.slice(0, 500);
+                    const attrs = [...(n.attributes || [])].map(a => `${a.name}=${a.value}`).join(' ');
+                    if (datePattern.test(`${t} ${attrs}`)) return `${t} ${attrs}`.slice(0, 800);
                   }
+                  const target = el.getBoundingClientRect();
+                  const candidates = [...document.querySelectorAll('h1,h2,h3,h4,time,[aria-label],[data-test-id],[data-testid]')]
+                    .map(node => ({
+                      text: `${node.innerText || ''} ${node.getAttribute('aria-label') || ''} ${node.getAttribute('datetime') || ''}`.replace(/\\s+/g, ' ').trim(),
+                      rect: node.getBoundingClientRect(),
+                    }))
+                    .filter(item => item.text.length < 160 && datePattern.test(item.text) && item.rect.top <= target.bottom)
+                    .sort((a, b) => {
+                      const score = item => Math.abs((item.rect.left + item.rect.right) / 2 - (target.left + target.right) / 2) * 3 + Math.abs(target.top - item.rect.bottom);
+                      return score(a) - score(b);
+                    });
+                  if (candidates.length) return candidates[0].text;
                   return '';
                 }"""
             )
