@@ -89,8 +89,8 @@ def config() -> dict[str, Any]:
     values.setdefault("discord_webhook_url", "")
     if os.environ.get("DISCORD_WEBHOOK_URL", "").strip():
         values["discord_webhook_url"] = os.environ["DISCORD_WEBHOOK_URL"].strip()
-    values.setdefault("check_interval_seconds", 300)
-    values.setdefault("jitter_seconds", 60)
+    values.setdefault("check_interval_seconds", 1200)
+    values.setdefault("jitter_seconds", 300)
     values.setdefault("headless", True)
     return values
 
@@ -259,7 +259,10 @@ async def slot_label(element: Locator) -> tuple[str, str] | None:
     raw = compact(await element.inner_text())
     aria = compact(await element.get_attribute("aria-label") or "")
     title = compact(await element.get_attribute("title") or "")
-    combined = compact(" ".join((raw, aria, title)))
+    attributes = []
+    for name in ("data-date", "data-start-date", "data-test-id", "datetime", "href"):
+        attributes.append(compact(await element.get_attribute(name) or ""))
+    combined = compact(" ".join((raw, aria, title, *attributes)))
     match = TIME_RE.search(raw) or TIME_RE.search(aria) or TIME_RE.search(title)
     if not match:
         return None
@@ -401,7 +404,23 @@ def default_state() -> dict[str, Any]:
         "last_status": "unknown",
         "consecutive_errors": 0,
         "technical_alert_sent": False,
+        "seen_slots": {},
     }
+
+
+def slot_key(slot: dict[str, str]) -> str:
+    return f"{compact(slot.get('date', '')).casefold()}|{compact(slot.get('time', '')).casefold()}"
+
+
+def seen_slots_from_state(state: dict[str, Any]) -> dict[str, str]:
+    raw = state.get("seen_slots", {})
+    seen = raw.copy() if isinstance(raw, dict) else {}
+    # Migration de l'ancien format : les créneaux présents dans l'état ont
+    # déjà fait l'objet d'une alerte et ne doivent pas être renvoyés.
+    for slot in state.get("slots", []):
+        if isinstance(slot, dict):
+            seen.setdefault(slot_key(slot), "historique")
+    return seen
 
 
 async def run_check(settings: dict[str, Any], diagnostic: bool = False) -> str:
@@ -421,45 +440,55 @@ async def run_check(settings: dict[str, Any], diagnostic: bool = False) -> str:
     if result.status == "available":
         canonical = json.dumps(result.slots, ensure_ascii=False, sort_keys=True)
         signature = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        changed = not state.get("available") or signature != state.get("signature")
-        preview = ", ".join(
-            f"{slot['date']} à {slot['time']}" for slot in result.slots[:12]
-        )
-        if changed:
+        seen_slots = seen_slots_from_state(state)
+        new_slots = [slot for slot in result.slots if slot_key(slot) not in seen_slots]
+        preview = ", ".join(f"{slot['date']} à {slot['time']}" for slot in result.slots[:12])
+        new_preview = ", ".join(f"{slot['date']} à {slot['time']}" for slot in new_slots[:12])
+        if new_slots:
             try:
                 send_discord(
-                    "🚨 **CRÉNEAU DOCTOLIB DISPONIBLE — PREMIER RENDEZ-VOUS**\n\n"
-                    f"**{DOCTOR_NAME}**\n\nHoraires détectés :\n**{preview}**\n\n"
+                    "🚨 **NOUVEAU CRÉNEAU DOCTOLIB — PREMIER RENDEZ-VOUS**\n\n"
+                    f"**{DOCTOR_NAME}**\n\nNouveaux horaires détectés :\n**{new_preview}**\n\n"
                     f"Lien :\n{DOCTOR_URL}\n\n"
                     "Réserve rapidement : le programme ne réserve rien automatiquement.",
                     webhook,
                 )
-                log(f"DISPONIBLE — notification envoyée — {preview}")
+                detected_at = datetime.now().astimezone().isoformat()
+                for slot in new_slots:
+                    seen_slots[slot_key(slot)] = detected_at
+                log(f"NOUVEAU — notification envoyée — {new_preview}")
             except Exception as exc:
-                log(f"DISPONIBLE, mais notification impossible — {compact(str(exc))}")
+                log(f"NOUVEAU, mais notification impossible — {compact(str(exc))}")
         else:
-            log(f"Disponibilité inchangée — {preview}")
+            log(f"Aucun nouveau créneau — créneaux déjà vus : {preview}")
         state.update(
             available=True, signature=signature, slots=result.slots, last_status="available",
             consecutive_errors=0, technical_alert_sent=False, retry_not_before_epoch=0,
+            seen_slots=seen_slots, last_success_epoch=int(time.time()),
         )
     elif result.status == "none":
         log("Aucun créneau de premier rendez-vous.")
         state.update(
             available=False, signature="", slots=[], last_status="none",
             consecutive_errors=0, technical_alert_sent=False, retry_not_before_epoch=0,
+            seen_slots=seen_slots_from_state(state), last_success_epoch=int(time.time()),
         )
     else:
         errors = min(3, int(state.get("consecutive_errors", 0)) + 1)
         log(f"Lecture non fiable ({result.status}, erreur {errors}) — {result.detail}")
         state.update(last_status=result.status, consecutive_errors=errors)
         if result.status == "rate_limited":
-            state["retry_not_before_epoch"] = int(time.time()) + 900
-            log("Protection HTTP 429 : prochain essai différé d'au moins 15 minutes.")
+            state["retry_not_before_epoch"] = int(time.time()) + 7200
+            log("Protection HTTP 429 : prochain essai différé de 2 heures pour laisser Doctolib lever la limitation.")
         elif result.status == "blocked":
             state["retry_not_before_epoch"] = int(time.time()) + 21600
             log("Blocage cloud HTTP 403 : prochain essai différé d'au moins 6 heures.")
-        if errors >= 3 and not state.get("technical_alert_sent") and webhook:
+        if (
+            errors >= 3
+            and result.status not in {"rate_limited", "blocked"}
+            and not state.get("technical_alert_sent")
+            and webhook
+        ):
             try:
                 if result.status == "blocked":
                     alert_detail = (

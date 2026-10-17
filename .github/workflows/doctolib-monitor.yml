@@ -4,7 +4,7 @@ on:
   schedule:
     # Le cloud sert uniquement à vérifier si le blocage HTTP 403 de
     # Doctolib a disparu. La surveillance active reste locale.
-    - cron: "17 * * * *"
+    - cron: "17 */6 * * *"
   workflow_dispatch:
     inputs:
       test_discord:
