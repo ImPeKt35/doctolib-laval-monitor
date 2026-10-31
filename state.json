@@ -2,9 +2,9 @@
   "available": false,
   "signature": "",
   "slots": [],
-  "last_status": "rate_limited",
+  "last_status": "blocked",
   "consecutive_errors": 3,
   "technical_alert_sent": true,
   "seen_slots": {},
-  "retry_not_before_epoch": 1793456467
+  "retry_not_before_epoch": 1793503839
 }
